@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+# Load environment variables from .env file
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+else
+    echo ".env file not found"
+    exit 1
+fi
+
+check_mysql() {
+    echo "Checking MySQL readiness..."
+    until mysql -h"$DB_HOST" -u"$DB_USERNAME" -p"$DB_PASSWORD" -e "SELECT 1;" > /dev/null 2>&1; do
+        echo "Waiting for MySQL to be ready..."
+        sleep 5
+    done
+    echo "Success: MySQL is up and running."
+}
+
+check_mysql
+
+chmod -R 777 /var/www/html/storage
+chmod -R 777 /var/www/html/bootstrap/cache
+composer install
+
+# php artisan key:generate
+# php artisan config:clear
+php artisan migrate --force
+
+#npm i
+#npm run build
+
+if [ ! -z "$WWWUSER" ]; then
+    usermod -u $WWWUSER sail
+fi
+
+if [ ! -d /.composer ]; then
+    mkdir /.composer
+fi
+
+chmod -R ugo+rw /.composer
+
+if [ $# -gt 0 ]; then
+    exec gosu $WWWUSER "$@"
+else
+    if [ "$WORKER_MODE" = "true" ]; then
+        exec /usr/bin/supervisord -c /etc/supervisor/conf.d/worker.conf
+    else
+        exec /usr/bin/supervisord -c /etc/supervisor/conf.d/webserver.conf
+    fi
+fi
+
